@@ -1,0 +1,22 @@
+# Core packages
+crawl4ai>=0.1.0  # For web crawling functionality
+python-dotenv>=1.0.0  # For environment variable management
+pydantic>=2.0.0  # For data validation
+
+# FastAPI and dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# Async support
+aiohttp>=3.9.0  # Required for async operations
+asyncio>=3.4.3  # For async/await syntax support
+
+# HTML/Markdown processing
+beautifulsoup4>=4.12.0  # For HTML parsing
+markdown>=3.5.0  # For markdown conversion
+html2text>=2020.1.16  # For HTML to markdown conversion
+
+# Optional but recommended
+tqdm>=4.66.0  # For progress bars
+requests>=2.31.0  # For HTTP requests 
