@@ -165,7 +165,7 @@ async def search_linkedin_posts(
                 
                 Important: Return no more than 15 posts, prioritizing the most relevant ones."""
             ),
-            cache_mode="DISABLED"
+            bypass_cache=True
         )
     
     response = json.loads(result.extracted_content)

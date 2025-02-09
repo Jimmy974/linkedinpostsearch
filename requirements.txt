@@ -1,5 +1,5 @@
 # Core packages
-crawl4ai>=0.1.0  # For web crawling functionality
+crawl4ai # For web crawling functionality
 python-dotenv>=1.0.0  # For environment variable management
 pydantic>=2.0.0  # For data validation
 
