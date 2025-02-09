@@ -153,7 +153,7 @@ async def search_linkedin_posts(
                 api_token=os.getenv("TOGETHER_API_KEY"),
                 schema=LinkedInPost.model_json_schema(),
                 extraction_type="schema",
-                instruction="""From the crawled content, extract LinkedIn post details in JSON format. 
+                instruction="""From the crawled content, extract up to a maximum of 15 LinkedIn post details in JSON format. 
                 Each post should include:
                 - title: The post title or headline
                 - url: The LinkedIn post URL
@@ -161,7 +161,9 @@ async def search_linkedin_posts(
                 - description: Brief description or preview of the post
                 - date: The publication date
                 - author: The post author's name
-                - tags: List of hashtags mentioned in the post"""
+                - tags: List of hashtags mentioned in the post
+                
+                Important: Return no more than 15 posts, prioritizing the most relevant ones."""
             ),
             bypass_cache=True
         )
