@@ -169,6 +169,7 @@ async def search_linkedin_posts(
         )
     
     response = json.loads(result.extracted_content)
+    print(response)
     print(f"Found {len(response)} posts")
     
     # Filter for valid LinkedIn post URLs and publication date
