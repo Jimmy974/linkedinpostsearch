@@ -17,6 +17,10 @@ beautifulsoup4>=4.12.0  # For HTML parsing
 markdown>=3.5.0  # For markdown conversion
 html2text>=2020.1.16  # For HTML to markdown conversion
 
+# Search engines
+duckduckgo-search>=3.9.0  # For DuckDuckGo search functionality
+exa_py>=1.0.6  # For Exa search functionality
+
 # Optional but recommended
 tqdm>=4.66.0  # For progress bars
 requests>=2.31.0  # For HTTP requests 

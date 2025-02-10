@@ -1,111 +1,99 @@
-# LinkedIn Post Crawler for n8n
+# LinkedIn Post Search Tool
 
-A FastAPI-based service that searches and extracts content from LinkedIn posts, designed to work with n8n workflows.
+A tool for searching and extracting content from LinkedIn posts using multiple search providers.
 
 ## Features
 
-- Search LinkedIn posts using keywords
-- Filter posts by date range (min and max publish dates)
-- Extract post content and metadata
-- Convert posts to markdown format
-- Debug mode with HTML output
-- Configurable LLM provider for content extraction
-- Docker support for easy deployment
+- Multiple search providers:
+  - Google Search with LLM extraction
+  - DuckDuckGo Search
+  - Exa Search (semantic search)
+- Date range filtering
+- Content extraction
+- Markdown export
+- Configurable result limits
 
 ## Installation
 
-### Using Docker
-
-1. Build the Docker image:
-```bash
-docker build -t n8n-linkedin-post .
-```
-
-2. Run the container:
-```bash
-docker run -p 8000:8000 -e TOGETHER_API_KEY=your_api_key n8n-linkedin-post
-```
-
-### Local Development
-
-1. Clone the repository:
-```bash
-git clone <your-repo-url>
-cd n8nlinkedInPost
-```
-
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
+1. Clone the repository
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Create `.env` file with your API keys:
-```bash
-TOGETHER_API_KEY=your_api_key
-```
-
-5. Run the application:
-```bash
-uvicorn main:app --reload
-```
-
-## API Usage
-
-### Search Endpoint
-
-`POST /search`
-
-Request body:
-```json
-{
-    "keywords": "n8n automation workflow",
-    "min_publish_date": "2024-01-01",
-    "max_publish_date": "2024-03-31",
-    "debug_html": false,
-    "llm_provider": "together_ai/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
-}
-```
-
-Response:
-```json
-{
-    "posts": [
-        {
-            "title": "Example Post",
-            "url": "https://linkedin.com/posts/example",
-            "author": "John Doe",
-            "date": "2024-02-01",
-            "content": "Post content in markdown",
-            "tags": ["n8n", "automation"],
-            "debug_files": null
-        }
-    ],
-    "total_posts": 1,
-    "search_metadata": {
-        "keywords": "n8n automation workflow",
-        "min_publish_date": "2024-01-01",
-        "max_publish_date": "2024-03-31",
-        "timestamp": "2024-03-20T10:30:00.000Z"
-    }
-}
-```
-
-### Debug Files Endpoint
-
-`GET /debug/{filename}`
-
-Returns the debug HTML file for a specific post.
-
 ## Environment Variables
 
-- `TOGETHER_API_KEY`: API key for Together.ai LLM service
-- `PORT`: Port to run the service on (default: 8000)
+Create a `.env` file with the following variables:
+
+```env
+# Required for LLM extraction (Google search)
+TOGETHER_API_KEY=your_together_api_key
+
+# Optional: Required only if using Exa search
+EXA_API_KEY=your_exa_api_key
+```
+
+## Usage
+
+You can use any of the three search providers to find LinkedIn posts:
+
+```python
+from n8nlinkedInPost.utils.linkedin import (
+    search_linkedin_posts,
+    search_linkedin_posts_duckduckgo,
+    search_linkedin_posts_exa
+)
+
+# Using Google Search with LLM extraction
+posts = await search_linkedin_posts(
+    keywords="n8n automation",
+    min_publish_date="2024-01-01"
+)
+
+# Using DuckDuckGo Search
+posts = await search_linkedin_posts_duckduckgo(
+    keywords="n8n automation",
+    min_publish_date="2024-01-01"
+)
+
+# Using Exa Search (requires EXA_API_KEY)
+posts = await search_linkedin_posts_exa(
+    keywords="n8n automation",
+    min_publish_date="2024-01-01"
+)
+```
+
+### Search Provider Comparison
+
+1. **Google Search with LLM**
+   - Best for: Comprehensive results with good content extraction
+   - Requires: TOGETHER_API_KEY
+   - Features: Full content extraction, hashtag detection
+
+2. **DuckDuckGo Search**
+   - Best for: Quick searches without API key
+   - Requires: No API key
+   - Features: Basic content extraction, date filtering
+
+3. **Exa Search**
+   - Best for: Semantic search with high relevance
+   - Requires: EXA_API_KEY
+   - Features: Semantic understanding, good date filtering, fast results
+
+## Output Format
+
+All search providers return results in a consistent format using the `LinkedInSearchResult` class:
+
+```python
+@dataclass
+class LinkedInSearchResult:
+    title: str
+    url: str
+    description: str
+    date: Optional[datetime]
+    author: Optional[str]
+    tags: List[str]
+```
 
 ## Development
 

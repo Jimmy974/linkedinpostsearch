@@ -6,9 +6,55 @@ import os
 from bs4 import BeautifulSoup
 from models.schemas import LinkedInPost
 from dotenv import load_dotenv
+from duckduckgo_search import DDGS
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from exa_py import Exa
 
 # Load environment variables
 load_dotenv()
+
+# Initialize Exa client
+if not os.getenv("EXA_API_KEY"):
+    print("Warning: EXA_API_KEY not found in environment variables. Exa search will not be available.")
+    exa_client = None
+else:
+    exa_client = Exa(api_key=os.getenv("EXA_API_KEY"))
+
+@dataclass
+class LinkedInSearchResult:
+    title: str
+    url: str
+    description: str
+    date: Optional[datetime] = None
+    author: Optional[str] = None
+    tags: List[str] = None
+    
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+
+def parse_duckduckgo_date(date_str: str) -> Optional[datetime]:
+    """Parse DuckDuckGo date string into datetime object"""
+    try:
+        # Try parsing ISO format
+        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        try:
+            # Try parsing relative date (e.g., "1 day ago", "2 weeks ago")
+            if 'day' in date_str:
+                days = int(date_str.split()[0])
+                return datetime.now() - timedelta(days=days)
+            elif 'week' in date_str:
+                weeks = int(date_str.split()[0])
+                return datetime.now() - timedelta(weeks=weeks)
+            elif 'month' in date_str:
+                months = int(date_str.split()[0])
+                return datetime.now() - timedelta(days=months * 30)
+        except:
+            pass
+    return None
 
 async def extract_post_content(url: str, post_meta: dict, debug_html: bool = False) -> str:
     """
@@ -198,6 +244,194 @@ async def search_linkedin_posts(
     
     return valid_posts
 
+async def search_linkedin_posts_duckduckgo(
+    keywords: str,
+    min_publish_date: Optional[str] = None,
+    max_publish_date: Optional[str] = None,
+    max_results: int = 15
+) -> List[LinkedInSearchResult]:
+    """
+    Search for LinkedIn posts by keywords using DuckDuckGo API
+    
+    Args:
+        keywords (str): Keywords to search for in posts
+        min_publish_date (str, optional): Minimum publish date in YYYY-MM-DD format
+        max_publish_date (str, optional): Maximum publish date in YYYY-MM-DD format
+        max_results (int): Maximum number of results to return (default: 15)
+        
+    Returns:
+        List[LinkedInSearchResult]: List of found LinkedIn posts
+    """
+    print(f"Searching LinkedIn posts with DuckDuckGo using keywords: {keywords}")
+    
+    # Convert string dates to datetime if provided
+    min_date = None
+    max_date = None
+    try:
+        if min_publish_date:
+            min_date = datetime.strptime(min_publish_date, "%Y-%m-%d")
+        if max_publish_date:
+            max_date = datetime.strptime(max_publish_date, "%Y-%m-%d")
+    except ValueError as e:
+        print(f"Error parsing date: {str(e)}")
+        print("Date should be in YYYY-MM-DD format")
+        return []
+    
+    # Determine time limit based on min_date
+    timelimit = "y"  # default to 1 year
+    if min_date:
+        days_ago = (datetime.now() - min_date).days
+        if days_ago <= 1:
+            timelimit = "d"
+        elif days_ago <= 7:
+            timelimit = "w"
+        elif days_ago <= 30:
+            timelimit = "m"
+    
+    # Format search query
+    search_query = f"site:linkedin.com/posts {keywords}"
+    print(f"Search query: {search_query}")
+    
+    # Initialize DuckDuckGo search
+    search_results = []
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(
+                search_query,
+                max_results=15,  # Get more results to account for filtering
+                timelimit=timelimit
+            )
+            print(results)
+            # Process results
+            for r in results:
+                if not "linkedin.com/posts" in r.get("link", "").lower():
+                    continue
+                    
+                # Parse date
+                post_date = parse_duckduckgo_date(r.get("datetime", ""))
+                
+                # Apply date filters
+                if min_date and (not post_date or post_date < min_date):
+                    continue
+                if max_date and (not post_date or post_date > max_date):
+                    continue
+                
+                # Extract author from title if possible
+                title = r.get("title", "")
+                author = ""
+                if " | " in title:
+                    author = title.split(" | ")[0].strip()
+                
+                # Create search result object
+                result = LinkedInSearchResult(
+                    title=title,
+                    url=r.get("link", ""),
+                    description=r.get("body", ""),
+                    date=post_date,
+                    author=author,
+                    tags=[]  # Tags would need content parsing to extract
+                )
+                search_results.append(result)
+                
+                if len(search_results) >= max_results:
+                    break
+                    
+    except Exception as e:
+        print(f"Error during DuckDuckGo search: {str(e)}")
+        return []
+    
+    print(f"Found {len(search_results)} valid posts")
+    return search_results
+
+async def search_linkedin_posts_exa(
+    keywords: str,
+    min_publish_date: Optional[str] = None,
+    max_publish_date: Optional[str] = None,
+    max_results: int = 15
+) -> List[LinkedInSearchResult]:
+    """
+    Search for LinkedIn posts by keywords using Exa search API
+    
+    Args:
+        keywords (str): Keywords to search for in posts
+        min_publish_date (str, optional): Minimum publish date in YYYY-MM-DD format
+        max_publish_date (str, optional): Maximum publish date in YYYY-MM-DD format
+        max_results (int): Maximum number of results to return (default: 15)
+        
+    Returns:
+        List[LinkedInSearchResult]: List of found LinkedIn posts
+    """
+    if not exa_client:
+        print("Error: Exa client not initialized. Please set EXA_API_KEY environment variable.")
+        return []
+        
+    print(f"Searching LinkedIn posts with Exa using keywords: {keywords}")
+    
+    
+    # Prepare search parameters
+    search_params = {
+        "query": keywords,
+        "num_results": max_results * 2,
+        "include_domains": ["linkedin.com"],
+        "exclude_domains": [],
+        # "text": True,
+        # "use_autoprompt": True,
+        # "category": "linkedin posts"  # Added to focus on LinkedIn content
+    }
+    
+    # Add date filters if provided
+    if min_publish_date:
+        search_params["start_published_date"] = min_publish_date
+    if max_publish_date:
+        search_params["end_published_date"] = max_publish_date
+    
+    search_results = []
+    try:
+        # Perform the search
+        results = exa_client.search(**search_params)
+        print(results)
+        
+        # Process results
+        for result in results.results:
+
+            # Skip if not a LinkedIn post
+            if not "linkedin.com/posts" in result.url.lower():
+                continue
+            
+            # Parse the date from the result
+            try:
+                post_date = datetime.fromisoformat(result.published_date.replace('Z', '+00:00')) if result.published_date else None
+            except (TypeError, ValueError):
+                post_date = None
+            
+            
+            # Extract author from title if possible
+            title = result.title or ""
+            author = ""
+            if " | " in title:
+                author = title.split(" | ")[0].strip()
+            
+            # Create search result object
+            search_result = LinkedInSearchResult(
+                title=title,
+                url=result.url,
+                description=result.text or "",
+                date=post_date,
+                author=author,
+                tags=[]  # Tags would need content parsing to extract
+            )
+            search_results.append(search_result)
+            
+            if len(search_results) >= max_results:
+                break
+                
+    except Exception as e:
+        print(f"Error during Exa search: {str(e)}")
+        return []
+    
+    print(f"Found {len(search_results)} valid posts")
+    return search_results
+
 async def main():
     """
     Main entry point for testing LinkedIn scraping functionality
@@ -208,13 +442,31 @@ async def main():
             "keywords": "n8n automation workflow",
             "min_publish_date": "2024-01-01",
             "debug_html": True,
-            "llm_provider": "together_ai/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+            "llm_provider": "together_ai/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+            "use_duckduckgo": False,
+            "use_exa": False
         },
         {
             "keywords": "n8n integration",
             "min_publish_date": None,
             "debug_html": True,
-            "llm_provider": "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+            "llm_provider": "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            "use_duckduckgo": False,
+            "use_exa": False
+        },
+        {
+            "keywords": "n8n workflow automation",
+            "min_publish_date": "2024-01-01",
+            "debug_html": True,
+            "use_duckduckgo": True,
+            "use_exa": False
+        },
+        {
+            "keywords": "n8n automation tips",
+            "min_publish_date": "2024-01-01",
+            "debug_html": True,
+            "use_duckduckgo": False,
+            "use_exa": True
         }
     ]
     
@@ -223,12 +475,26 @@ async def main():
         print(json.dumps(test_case, indent=2))
         
         try:
-            # Search for posts
-            posts = await search_linkedin_posts(
-                keywords=test_case["keywords"],
-                min_publish_date=test_case["min_publish_date"],
-                llm_provider=test_case["llm_provider"]
-            )
+            # Search for posts using the specified method
+            if test_case.get("use_exa", False):
+                if not exa_client:
+                    print("Skipping Exa search test case - EXA_API_KEY not set")
+                    continue
+                posts = await search_linkedin_posts_exa(
+                    keywords=test_case["keywords"],
+                    min_publish_date=test_case["min_publish_date"]
+                )
+            elif test_case.get("use_duckduckgo", False):
+                posts = await search_linkedin_posts_duckduckgo(
+                    keywords=test_case["keywords"],
+                    min_publish_date=test_case["min_publish_date"]
+                )
+            else:
+                posts = await search_linkedin_posts(
+                    keywords=test_case["keywords"],
+                    min_publish_date=test_case["min_publish_date"],
+                    llm_provider=test_case["llm_provider"]
+                )
             
             print(f"\nFound {len(posts)} posts")
             
@@ -236,22 +502,33 @@ async def main():
             for j, post in enumerate(posts, 1):
                 print(f"\nProcessing post {j}:")
                 try:
+                    # Convert LinkedInSearchResult to dict if needed
+                    post_dict = post if isinstance(post, dict) else {
+                        "url": post.url,
+                        "title": post.title,
+                        "description": post.description,
+                        "date": post.date.strftime("%Y-%m-%d") if post.date else "",
+                        "author": post.author or "",
+                        "id": post.url.split("/")[-1],
+                        "tags": post.tags
+                    }
+                    
                     # Extract content
                     content = await extract_post_content(
-                        post['url'],
-                        post,
+                        post_dict["url"],
+                        post_dict,
                         debug_html=test_case["debug_html"]
                     )
                     
                     # Save to markdown file
-                    post_id = post.get('id', f'post_{j}').replace('/', '_')
+                    post_id = post_dict.get("id", f"post_{j}").replace("/", "_")
                     filename = f"{post_id}.md"
-                    with open(filename, 'w', encoding='utf-8') as f:
+                    with open(filename, "w", encoding="utf-8") as f:
                         f.write(content)
                     print(f"Saved content to {filename}")
                     
                 except Exception as e:
-                    print(f"Error processing post {post.get('url')}: {str(e)}")
+                    print(f"Error processing post {post_dict.get('url')}: {str(e)}")
                     continue
                 
         except Exception as e:
