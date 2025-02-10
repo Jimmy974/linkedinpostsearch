@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
 import os
 from models.schemas import SearchRequest, SearchResponse
 from utils.linkedin import search_linkedin_posts, extract_post_content, search_linkedin_posts_duckduckgo, search_linkedin_posts_exa
@@ -7,41 +8,29 @@ from utils.linkedin import search_linkedin_posts, extract_post_content, search_l
 router = APIRouter()
 
 @router.post("/search", response_model=SearchResponse)
-async def search_linkedin_posts_endpoint(request: SearchRequest) -> SearchResponse:
+async def search_linkedin_posts_endpoint(request: SearchRequest) -> JSONResponse:
     """
     Search LinkedIn posts with the given keywords and parameters
     """
     try:
-        # Get posts from LinkedIn
-        # posts = await search_linkedin_posts(
-        #     keywords=request.keywords,
-        #     min_publish_date=request.min_publish_date,
-        #     max_publish_date=request.max_publish_date,
-        #     llm_provider=request.llm_provider
-        # )
-        # # Get posts from LinkedIn
-        # posts = await search_linkedin_posts_duckduckgo(
-        #     keywords=request.keywords,
-        #     min_publish_date=request.min_publish_date,
-        #     max_publish_date=request.max_publish_date
-        # )        
         posts = await search_linkedin_posts_exa(
             keywords=request.keywords,
             min_publish_date=request.min_publish_date,
             max_publish_date=request.max_publish_date
         )
+        
         # Process each post
         post_responses = []
         for post in posts:
             try:
-                # Extract content
+                # Extract content with simplified data structure
                 content = await extract_post_content(post.url, {
-                    "url": post.url,
-                    "title": post.title,
-                    "description": post.description,
+                    "url": str(post.url),
+                    "title": str(post.title),
+                    "description": str(post.description),
                     "date": post.date.isoformat() if post.date else "",
-                    "author": post.author or "",
-                    "tags": post.tags or []
+                    "author": str(post.author or ""),
+                    "tags": [str(tag) for tag in (post.tags or [])]
                 }, debug_html=request.debug_html)
                 
                 # Get debug files if enabled
@@ -50,21 +39,17 @@ async def search_linkedin_posts_endpoint(request: SearchRequest) -> SearchRespon
                     post_id = post.url.split("/")[-1].replace('/', '_')
                     debug_dir = "debug_html"
                     if os.path.exists(debug_dir):
-                        files = [
-                            f for f in os.listdir(debug_dir)
-                            if f.startswith(post_id)
-                        ]
-                        if files:
-                            debug_files = files
+                        debug_files = [f for f in os.listdir(debug_dir) if f.startswith(post_id)]
                 
+                # Create a simplified post response dictionary
                 post_response = {
-                    "title": post.title,
-                    "url": post.url,
-                    "id": post.url.split("/")[-1],  # Extract ID from URL
-                    "author": post.author,
+                    "title": str(post.title),
+                    "url": str(post.url),
+                    "id": str(post.url.split("/")[-1]),
+                    "author": str(post.author),
                     "date": post.date.isoformat() if post.date else "",
-                    "content": content,
-                    "tags": post.tags,
+                    "content": str(content),
+                    "tags": [str(tag) for tag in (post.tags or [])],
                     "debug_files": debug_files
                 }
                 post_responses.append(post_response)
@@ -73,16 +58,20 @@ async def search_linkedin_posts_endpoint(request: SearchRequest) -> SearchRespon
                 print(f"Error processing post {post.url}: {str(e)}")
                 continue
         
-        return SearchResponse(
-            posts=post_responses,
-            total_posts=len(post_responses),
-            search_metadata={
-                "keywords": request.keywords,
-                "min_publish_date": request.min_publish_date,
-                "max_publish_date": request.max_publish_date,
-                "llm_provider": request.llm_provider
+        response_data = {
+            "posts": post_responses,
+            "total_posts": len(post_responses),
+            "search_metadata": {
+                "keywords": str(request.keywords),
+                "min_publish_date": str(request.min_publish_date),
+                "max_publish_date": str(request.max_publish_date),
+                "llm_provider": str(request.llm_provider)
             }
-        )
+        }
+        
+        # Use JSONResponse with jsonable_encoder to handle serialization
+        return JSONResponse(content=jsonable_encoder(response_data))
+        
     except Exception as e:
         raise HTTPException(
             status_code=500,
