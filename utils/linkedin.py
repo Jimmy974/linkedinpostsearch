@@ -62,88 +62,93 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
     """
     print(f"Extracting content from: {url}")
     
-    # First get the raw HTML
-    async with AsyncWebCrawler(verbose=True) as crawler:
-        raw_result = await crawler.arun(
-            url=url,
-            word_count_threshold=1,
-            bypass_cache=True,
-            remove_overlay_elements=True
-        )
-        
-        if debug_html:
-            # Create debug directory if it doesn't exist
-            debug_dir = "debug_html"
-            os.makedirs(debug_dir, exist_ok=True)
-            
-            # Format HTML using BeautifulSoup
-            soup = BeautifulSoup(raw_result.html, 'html.parser')
-            formatted_html = soup.prettify()
-            
-            # Save raw and formatted HTML for debugging
-            post_id = post_meta.get('id', 'unknown').replace('/', '_')
-            
-            # Save formatted HTML
-            formatted_html_file = os.path.join(debug_dir, f"{post_id}_formatted.html")
-            with open(formatted_html_file, 'w', encoding='utf-8') as f:
-                f.write(formatted_html)
-            print(f"Saved formatted HTML to {formatted_html_file}")
-    
-    # define schema for content extraction
-    schema = {
-        "name": "content",
-        "baseSelector": "main",  # Start from main content area
-        "fields": [
-            {
-                "name": "post_content",
-                "selector": ".attributed-text-segment-list__content",
-                "type": "text",
-                "multiple": True  # Get all matching spans
-            }
-        ]
-    }
-    
-    async with AsyncWebCrawler(verbose=True) as crawler:
-        result = await crawler.arun(
-            url=url,
-            word_count_threshold=1,
-            extraction_strategy=JsonCssExtractionStrategy(schema=schema),
-            bypass_cache=True,
-            remove_overlay_elements=True
-        )
-    
     try:
-        # Extract content from the result
-        extracted_data = json.loads(result.extracted_content)
-        post_content = json.loads(result.extracted_content)[0]["post_content"]
+        # First get the raw HTML with size limit
+        async with AsyncWebCrawler(verbose=True) as crawler:
+            raw_result = await crawler.arun(
+                url=url,
+                word_count_threshold=1,
+                bypass_cache=True,
+                remove_overlay_elements=True
+            )
+            
+            if debug_html and raw_result.html:
+                # Create debug directory if it doesn't exist
+                debug_dir = "debug_html"
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                # Save raw HTML directly without BeautifulSoup
+                post_id = str(post_meta.get('id', 'unknown')).replace('/', '_')[:100]
+                debug_file = os.path.join(debug_dir, f"{post_id}_raw.html")
+                with open(debug_file, 'w', encoding='utf-8') as f:
+                    f.write(raw_result.html[:50000])  # Limit debug file size
         
-        # Format as markdown
-        markdown_content = []
+        # Extract content using CSS selectors
+        schema = {
+            "name": "content",
+            "baseSelector": "main",
+            "fields": [
+                {
+                    "name": "post_content",
+                    "selector": ".attributed-text-segment-list__content",
+                    "type": "text",
+                    "multiple": True
+                }
+            ]
+        }
         
-        # # Add title
-        # markdown_content.append(f"# {post_meta['title']}\n")
+        async with AsyncWebCrawler(verbose=True) as crawler:
+            result = await crawler.arun(
+                url=url,
+                word_count_threshold=1,
+                extraction_strategy=JsonCssExtractionStrategy(schema=schema),
+                bypass_cache=True,
+                remove_overlay_elements=True
+            )
         
-        # # Add metadata
-        # if post_meta.get('author'):
-        #     markdown_content.append(f"**Author:** {post_meta['author']}")
-        # if post_meta.get('date'):
-        #     markdown_content.append(f"**Date:** {post_meta['date']}")
-        # markdown_content.append("")  # Empty line after metadata
+        # Early return if no content
+        if not result or not result.extracted_content:
+            return "No content extracted"
+            
+        # Limit content size before processing
+        content_str = result.extracted_content[:100000]
         
-        # Add main content
-        if post_content:
-            markdown_content.append(post_content)
-        
-        # # Add hashtags
-        # if post_meta.get('tags'):
-        #     markdown_content.append("\n**Tags:** " + " ".join(post_meta['tags']))
-        
-        return "\n".join(markdown_content)
-        
+        try:
+            # Single JSON parse with validation
+            extracted_data = json.loads(content_str)
+            
+            # Validate data structure
+            if not isinstance(extracted_data, list):
+                return "Invalid content format: expected list"
+            
+            if not extracted_data:
+                return "No content found in response"
+                
+            if not isinstance(extracted_data[0], dict):
+                return "Invalid content format: expected dictionary"
+            
+            # Get post content with fallback
+            post_content = extracted_data[0].get("post_content")
+            if not post_content:
+                return "No post content found"
+            
+            # Ensure string type and limit size
+            post_content = str(post_content)
+            if len(post_content) > 50000:
+                post_content = post_content[:50000] + "... (truncated)"
+            
+            return post_content
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            return "Failed to parse content"
+        except Exception as e:
+            print(f"Content processing error: {e}")
+            return f"Error processing content: {str(e)}"
+            
     except Exception as e:
-        print(f"Error processing extracted content: {str(e)}")
-        print("Raw extracted content:", result.extracted_content)
-        raise
+        print(f"Extraction error: {e}")
+        return f"Failed to extract content: {str(e)}"
 
 async def search_linkedin_posts(
     keywords: str, 
@@ -389,7 +394,7 @@ async def search_linkedin_posts_exa(
     try:
         # Perform the search
         results = exa_client.search(**search_params)
-        print(results)
+        # print(results)
         
         # Process results
         for result in results.results:
