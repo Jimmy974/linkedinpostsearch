@@ -120,23 +120,23 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
         # Format as markdown
         markdown_content = []
         
-        # Add title
-        markdown_content.append(f"# {post_meta['title']}\n")
+        # # Add title
+        # markdown_content.append(f"# {post_meta['title']}\n")
         
-        # Add metadata
-        if post_meta.get('author'):
-            markdown_content.append(f"**Author:** {post_meta['author']}")
-        if post_meta.get('date'):
-            markdown_content.append(f"**Date:** {post_meta['date']}")
-        markdown_content.append("")  # Empty line after metadata
+        # # Add metadata
+        # if post_meta.get('author'):
+        #     markdown_content.append(f"**Author:** {post_meta['author']}")
+        # if post_meta.get('date'):
+        #     markdown_content.append(f"**Date:** {post_meta['date']}")
+        # markdown_content.append("")  # Empty line after metadata
         
         # Add main content
         if post_content:
             markdown_content.append(post_content)
         
-        # Add hashtags
-        if post_meta.get('tags'):
-            markdown_content.append("\n**Tags:** " + " ".join(post_meta['tags']))
+        # # Add hashtags
+        # if post_meta.get('tags'):
+        #     markdown_content.append("\n**Tags:** " + " ".join(post_meta['tags']))
         
         return "\n".join(markdown_content)
         
