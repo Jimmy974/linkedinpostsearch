@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from exa_py import Exa
+import sys
+from functools import partial
 
 # Load environment variables
 load_dotenv()
@@ -62,28 +64,46 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
     """
     print(f"Extracting content from: {url}")
     
+    # Set recursion limit for this function
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(200000)  # Increase limit temporarily
+    
     try:
-        # First get the raw HTML with size limit
-        async with AsyncWebCrawler(verbose=True) as crawler:
-            raw_result = await crawler.arun(
-                url=url,
-                word_count_threshold=1,
-                bypass_cache=True,
-                remove_overlay_elements=True
-            )
-            
-            if debug_html and raw_result.html:
-                # Create debug directory if it doesn't exist
-                debug_dir = "debug_html"
-                os.makedirs(debug_dir, exist_ok=True)
-                
-                # Save raw HTML directly without BeautifulSoup
-                post_id = str(post_meta.get('id', 'unknown')).replace('/', '_')[:100]
-                debug_file = os.path.join(debug_dir, f"{post_id}_raw.html")
-                with open(debug_file, 'w', encoding='utf-8') as f:
-                    f.write(raw_result.html[:50000])  # Limit debug file size
+        raw_result = None
         
-        # Extract content using CSS selectors
+        # Only get raw HTML if debug_html is True
+        if debug_html:
+            try:
+                async with AsyncWebCrawler(
+                    verbose=True,
+                    max_recursion_depth=50,
+                    timeout=30
+                ) as crawler:
+                    raw_result = await crawler.arun(
+                        url=url,
+                        word_count_threshold=1,
+                        bypass_cache=True,
+                        remove_overlay_elements=True,
+                        max_retries=2
+                    )
+                    
+                    if raw_result and hasattr(raw_result, 'html'):
+                        try:
+                            # Create debug directory if it doesn't exist
+                            debug_dir = "debug_html"
+                            os.makedirs(debug_dir, exist_ok=True)
+                            
+                            # Save raw HTML directly without processing
+                            post_id = str(post_meta.get('id', 'unknown')).replace('/', '_')[:50]
+                            debug_file = os.path.join(debug_dir, f"{post_id}_raw.html")
+                            with open(debug_file, 'w', encoding='utf-8') as f:
+                                f.write(raw_result.html[:20000])  # Reduced size limit
+                        except Exception as e:
+                            print(f"Debug file error: {e}")
+            except Exception as e:
+                print(f"Failed to get raw HTML for debug: {e}")
+        
+        # Simple schema for content extraction
         schema = {
             "name": "content",
             "baseSelector": "main",
@@ -92,50 +112,60 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
                     "name": "post_content",
                     "selector": ".attributed-text-segment-list__content",
                     "type": "text",
-                    "multiple": True
+                    "multiple": False
                 }
             ]
         }
         
-        async with AsyncWebCrawler(verbose=True) as crawler:
-            result = await crawler.arun(
-                url=url,
-                word_count_threshold=1,
-                extraction_strategy=JsonCssExtractionStrategy(schema=schema),
-                bypass_cache=True,
-                remove_overlay_elements=True
-            )
+        # Extract content with safety limits
+        async with AsyncWebCrawler(
+            verbose=True,
+            max_recursion_depth=50,
+            timeout=30
+        ) as crawler:
+            try:
+                result = await crawler.arun(
+                    url=url,
+                    word_count_threshold=1,
+                    extraction_strategy=JsonCssExtractionStrategy(
+                        schema=schema,
+                        max_depth=3
+                    ),
+                    bypass_cache=True,
+                    remove_overlay_elements=True,
+                    max_retries=2
+                )
+            except Exception as e:
+                print(f"Content extraction failed: {e}")
+                return "Failed to extract content"
         
         # Early return if no content
-        if not result or not result.extracted_content:
+        if not result or not hasattr(result, 'extracted_content') or not result.extracted_content:
             return "No content extracted"
             
         # Limit content size before processing
-        content_str = result.extracted_content[:100000]
+        content_str = result.extracted_content[:50000]
         
         try:
-            # Single JSON parse with validation
+            # Parse JSON with basic structure
             extracted_data = json.loads(content_str)
             
-            # Validate data structure
-            if not isinstance(extracted_data, list):
-                return "Invalid content format: expected list"
+            # Handle both list and dict responses
+            if isinstance(extracted_data, list):
+                content_item = extracted_data[0] if extracted_data else {}
+            elif isinstance(extracted_data, dict):
+                content_item = extracted_data
+            else:
+                return "Invalid content structure"
             
-            if not extracted_data:
-                return "No content found in response"
-                
-            if not isinstance(extracted_data[0], dict):
-                return "Invalid content format: expected dictionary"
-            
-            # Get post content with fallback
-            post_content = extracted_data[0].get("post_content")
+            # Get post content safely
+            post_content = str(content_item.get("post_content", ""))
             if not post_content:
-                return "No post content found"
+                return "No content found"
             
-            # Ensure string type and limit size
-            post_content = str(post_content)
-            if len(post_content) > 50000:
-                post_content = post_content[:50000] + "... (truncated)"
+            # Limit final content size
+            if len(post_content) > 20000:
+                post_content = post_content[:20000] + "... (truncated)"
             
             return post_content
             
@@ -149,6 +179,9 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
     except Exception as e:
         print(f"Extraction error: {e}")
         return f"Failed to extract content: {str(e)}"
+    finally:
+        # Restore original recursion limit
+        sys.setrecursionlimit(original_limit)
 
 async def search_linkedin_posts(
     keywords: str, 
