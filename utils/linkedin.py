@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from exa_py import Exa
 import sys
 from functools import partial
+from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher, RateLimiter, CrawlerMonitor, DisplayMode
 
 # Load environment variables
 load_dotenv()
@@ -64,10 +65,23 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
     """
     print(f"Extracting content from: {url}")
     
-    # Set recursion limit for this function
-    original_limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(200000)  # Increase limit temporarily
-    
+    # Create dispatcher with memory management and rate limiting
+    dispatcher = MemoryAdaptiveDispatcher(
+        memory_threshold_percent=70.0,  # Pause if memory exceeds 70%
+        check_interval=1.0,
+        max_session_permit=5,  # Limit concurrent tasks
+        rate_limiter=RateLimiter(
+            base_delay=(1.0, 2.0),  # Random delay between 1-2 seconds
+            max_delay=30.0,
+            max_retries=2,
+            rate_limit_codes=[429, 503]
+        ),
+        monitor=CrawlerMonitor(
+            max_visible_rows=15,
+            display_mode=DisplayMode.DETAILED
+        )
+    )
+
     try:
         raw_result = None
         
@@ -76,8 +90,9 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
             try:
                 async with AsyncWebCrawler(
                     verbose=True,
-                    max_recursion_depth=50,
-                    timeout=30
+                    max_recursion_depth=10,  # Reduced from 50
+                    timeout=30,
+                    dispatcher=dispatcher  # Add dispatcher
                 ) as crawler:
                     raw_result = await crawler.arun(
                         url=url,
@@ -120,8 +135,9 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
         # Extract content with safety limits
         async with AsyncWebCrawler(
             verbose=True,
-            max_recursion_depth=50,
-            timeout=30
+            max_recursion_depth=10,  # Reduced from 50
+            timeout=30,
+            dispatcher=dispatcher  # Add dispatcher
         ) as crawler:
             try:
                 result = await crawler.arun(
@@ -129,7 +145,7 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
                     word_count_threshold=1,
                     extraction_strategy=JsonCssExtractionStrategy(
                         schema=schema,
-                        max_depth=3
+                        max_depth=2  # Reduced from 3
                     ),
                     bypass_cache=True,
                     remove_overlay_elements=True,
@@ -179,9 +195,6 @@ async def extract_post_content(url: str, post_meta: dict, debug_html: bool = Fal
     except Exception as e:
         print(f"Extraction error: {e}")
         return f"Failed to extract content: {str(e)}"
-    finally:
-        # Restore original recursion limit
-        sys.setrecursionlimit(original_limit)
 
 async def search_linkedin_posts(
     keywords: str, 
